@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import {
-  addDoc,
   collection,
   doc,
   serverTimestamp,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
@@ -112,24 +112,26 @@ export function StudentsPage() {
       .filter(Boolean);
 
     try {
+      const batch = writeBatch(db);
       if (editing) {
-        await Promise.all([
-          updateDoc(doc(db, 'students', editing.student.id), {
-            name: name.trim(),
-            phone: phone.trim(),
-            guardianName: guardianName.trim(),
-            guardianPhone: guardianPhone.trim(),
-            updatedAt: serverTimestamp(),
-          }),
-          updateDoc(doc(db, 'relationships', editing.relationship.id), {
-            class: classLevel.trim(),
-            subjects,
-            updatedAt: serverTimestamp(),
-          }),
-        ]);
+        batch.update(doc(db, 'students', editing.student.id), {
+          name: name.trim(),
+          phone: phone.trim(),
+          guardianName: guardianName.trim(),
+          guardianPhone: guardianPhone.trim(),
+          updatedAt: serverTimestamp(),
+        });
+        batch.update(doc(db, 'relationships', editing.relationship.id), {
+          class: classLevel.trim(),
+          subjects,
+          updatedAt: serverTimestamp(),
+        });
+        await batch.commit();
         showToast('Student updated', 'success');
       } else {
-        const studentRef = await addDoc(collection(db, 'students'), {
+        const studentRef = doc(collection(db, 'students'));
+        const relRef = doc(collection(db, 'relationships'));
+        batch.set(studentRef, {
           uid: null,
           teacherId: userProfile.uid,
           teacherIds: [userProfile.uid],
@@ -140,8 +142,7 @@ export function StudentsPage() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-
-        await addDoc(collection(db, 'relationships'), {
+        batch.set(relRef, {
           teacherId: userProfile.uid,
           studentId: studentRef.id,
           class: classLevel.trim(),
@@ -150,6 +151,7 @@ export function StudentsPage() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
+        await batch.commit();
         showToast('Student profile added', 'success');
       }
       setFormOpen(false);
