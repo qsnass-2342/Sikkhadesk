@@ -3,7 +3,6 @@ import {
   collection,
   doc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -11,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { CalendarCheck, Check, Clock, FileWarning, X } from 'lucide-react';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { useStudentsData } from '../students/useStudentsData';
@@ -44,38 +44,38 @@ export function AttendancePage() {
     [students]
   );
 
-  const loadAttendance = useCallback(async () => {
-    if (!db || !teacherId) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const [sessSnap, sumSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'attendanceSessions'),
-            where('teacherId', '==', teacherId),
-            orderBy('date', 'desc'),
-            orderBy('createdAt', 'desc')
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'attendanceSummaries'),
-            where('teacherId', '==', teacherId)
-          )
-        ),
-      ]);
+  const loadAttendance = useCallback(
+    async (silent = false) => {
+      if (!db || !teacherId) {
+        setLoading(false);
+        return;
+      }
+      if (!silent) setLoading(true);
+      try {
+        const [sessSnap, sumSnap] = await Promise.all([
+          getDocs(
+            query(collection(db, 'attendanceSessions'), where('teacherId', '==', teacherId))
+          ),
+          getDocs(
+            query(collection(db, 'attendanceSummaries'), where('teacherId', '==', teacherId))
+          ),
+        ]);
 
-      setSessions(sessSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSession)));
-      setSummaries(sumSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSummary)));
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to load attendance', 'error');
-    } finally {
-      setLoading(false);
-    }
-  }, [teacherId, showToast]);
+        setSessions(
+          sortNewestFirst(
+            sessSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSession)),
+            (s) => s.date || s.createdAt
+          )
+        );
+        setSummaries(sumSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSummary)));
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Failed to load attendance', 'error');
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [teacherId, showToast]
+  );
 
   useEffect(() => {
     loadAttendance();
@@ -98,6 +98,7 @@ export function AttendancePage() {
     setSavingId(studentId);
     const sessionDocId = `${teacherId}_${studentId}_${selectedDate}`;
     const summaryDocId = `${teacherId}_${studentId}_${selectedMonth}`;
+    const existingSession = sessionMapForDate.get(studentId);
 
     try {
       await setDoc(
@@ -108,8 +109,8 @@ export function AttendancePage() {
           relationshipId,
           date: selectedDate,
           status,
-          note: '',
-          createdAt: serverTimestamp(),
+          note: existingSession?.note ?? '',
+          ...(existingSession ? {} : { createdAt: serverTimestamp() }),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -142,7 +143,7 @@ export function AttendancePage() {
         { merge: true }
       );
 
-      await loadAttendance();
+      await loadAttendance(true);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Could not update attendance', 'error');
     } finally {
