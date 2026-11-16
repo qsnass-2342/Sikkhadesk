@@ -5,7 +5,6 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   Timestamp,
@@ -14,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { Check, ClipboardList, Plus, Send, Trash2 } from 'lucide-react';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { useStudentsData } from '../students/useStudentsData';
@@ -62,32 +62,34 @@ export function NanoExamsPage() {
     setLoading(true);
     try {
       const [eSnap, qSnap, aSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'nanoExams'),
-            where('teacherId', '==', teacherId),
-            orderBy('createdAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'nanoExams'), where('teacherId', '==', teacherId))),
         getDocs(
           query(
             collection(db, 'questions'),
             where('ownerType', '==', 'teacher'),
-            where('ownerId', '==', teacherId),
-            orderBy('createdAt', 'desc')
+            where('ownerId', '==', teacherId)
           )
         ),
-        getDocs(
-          query(
-            collection(db, 'nanoAttempts'),
-            where('teacherId', '==', teacherId),
-            orderBy('submittedAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'nanoAttempts'), where('teacherId', '==', teacherId))),
       ]);
-      setExams(eSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoExam)));
-      setQuestions(qSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question)));
-      setAttempts(aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoAttempt)));
+      setExams(
+        sortNewestFirst(
+          eSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoExam)),
+          (e) => e.createdAt
+        )
+      );
+      setQuestions(
+        sortNewestFirst(
+          qSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question)),
+          (q) => q.createdAt
+        )
+      );
+      setAttempts(
+        sortNewestFirst(
+          aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoAttempt)),
+          (a) => a.submittedAt
+        )
+      );
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to load Nano Exams', 'error');
     } finally {
