@@ -3,8 +3,6 @@ import { Link } from 'react-router-dom';
 import {
   collection,
   getDocs,
-  limit,
-  orderBy,
   query,
   where,
 } from 'firebase/firestore';
@@ -19,6 +17,7 @@ import {
 } from 'recharts';
 import { ArrowRight, Award, CalendarCheck, ClipboardList, Users } from 'lucide-react';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { useStudentsData } from '../students/useStudentsData';
@@ -47,34 +46,31 @@ export function TeacherOverviewPage() {
       try {
         const [sessSnap, examSnap, attSnap] = await Promise.all([
           getDocs(
-            query(
-              collection(db, 'attendanceSessions'),
-              where('teacherId', '==', teacherId),
-              orderBy('date', 'desc'),
-              orderBy('createdAt', 'desc'),
-              limit(200)
-            )
+            query(collection(db, 'attendanceSessions'), where('teacherId', '==', teacherId))
           ),
-          getDocs(
-            query(
-              collection(db, 'offlineExams'),
-              where('teacherId', '==', teacherId),
-              orderBy('createdAt', 'desc'),
-              limit(20)
-            )
-          ),
-          getDocs(
-            query(
-              collection(db, 'nanoAttempts'),
-              where('teacherId', '==', teacherId),
-              orderBy('submittedAt', 'desc'),
-              limit(10)
-            )
-          ),
+          getDocs(query(collection(db, 'offlineExams'), where('teacherId', '==', teacherId))),
+          getDocs(query(collection(db, 'nanoAttempts'), where('teacherId', '==', teacherId))),
         ]);
-        setSessions(sessSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSession)));
-        setOfflineExams(examSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineExam)));
-        setAttempts(attSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoAttempt)));
+        setSessions(
+          sortNewestFirst(
+            sessSnap.docs.map((d) => ({ id: d.id, ...d.data() } as AttendanceSession)),
+            (s) => s.date || s.createdAt
+          )
+        );
+        setOfflineExams(
+          sortNewestFirst(
+            examSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineExam)),
+            (e) => e.createdAt
+          )
+        );
+        setAttempts(
+          sortNewestFirst(
+            attSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoAttempt)),
+            (a) => a.submittedAt
+          ).slice(0, 10)
+        );
+      } catch (err) {
+        console.error('Overview load error:', err);
       } finally {
         setLoading(false);
       }
