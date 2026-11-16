@@ -24,9 +24,11 @@ export function LoginPage() {
     userProfile,
     loading,
     authBlockState,
+    authError,
     signInWithGoogle,
     sendStudentEmailLink,
     initializeFirstTeacher,
+    refreshProfile,
     signOut,
   } = useAuth();
   const { t, toggleLang } = useI18n();
@@ -260,6 +262,27 @@ export function LoginPage() {
               </p>
               <div className="mt-6 flex gap-3">
                 <Button variant="secondary" onClick={signOut} className="w-full">
+                  {t.common.signOut}
+                </Button>
+              </div>
+            </SurfaceCard>
+          ) : authError && firebaseUser ? (
+            <SurfaceCard className="p-6 sm:p-8">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-4">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <h2 className="text-xl font-bold">Firestore Access Error</h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 break-words">
+                {authError}
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-3">
+                Make sure <code className="font-mono-num">firestore.rules</code> is deployed to your Firebase project.
+              </p>
+              <div className="mt-6 flex gap-3">
+                <Button onClick={() => refreshProfile()} className="flex-1">
+                  Retry
+                </Button>
+                <Button variant="secondary" onClick={signOut}>
                   {t.common.signOut}
                 </Button>
               </div>
