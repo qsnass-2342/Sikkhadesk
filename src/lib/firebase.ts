@@ -3,13 +3,25 @@ import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import { getFunctions, type Functions } from 'firebase/functions';
 
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyDBwuBuwgRxXACIx3aJS1PQF0nVKAWQbbQ',
+  authDomain: 'sikkhadesk-4123a.firebaseapp.com',
+  projectId: 'sikkhadesk-4123a',
+  storageBucket: 'sikkhadesk-4123a.firebasestorage.app',
+  messagingSenderId: '933503050032',
+  appId: '1:933503050032:web:e554d56d16a2cb9eb728f5',
+};
+
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.trim() || '',
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN?.trim() || '',
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID?.trim() || '',
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET?.trim() || '',
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() || '',
-  appId: import.meta.env.VITE_FIREBASE_APP_ID?.trim() || '',
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY?.trim() || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN?.trim() || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID?.trim() || DEFAULT_FIREBASE_CONFIG.projectId,
+  storageBucket:
+    import.meta.env.VITE_FIREBASE_STORAGE_BUCKET?.trim() || DEFAULT_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId:
+    import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID?.trim() ||
+    DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID?.trim() || DEFAULT_FIREBASE_CONFIG.appId,
 };
 
 const REQUIRED_KEYS: Array<keyof typeof firebaseConfig> = [
