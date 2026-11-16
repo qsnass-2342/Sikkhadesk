@@ -6,7 +6,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -25,6 +24,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { normalizeImageUrl, validateImageLoads } from '../../lib/driveUtils';
@@ -113,32 +113,31 @@ export function NanoLibraryPage() {
           query(
             collection(db, 'questions'),
             where('ownerType', '==', 'teacher'),
-            where('ownerId', '==', teacherId),
-            orderBy('createdAt', 'desc')
+            where('ownerId', '==', teacherId)
           )
         ),
-        getDocs(
-          query(
-            collection(db, 'questions'),
-            where('ownerType', '==', 'platform'),
-            orderBy('createdAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'questions'), where('ownerType', '==', 'platform'))),
       ]);
 
-      const mine = mySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question));
-      const plat = platSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question));
+      const mine = sortNewestFirst(
+        mySnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question)),
+        (q) => q.createdAt
+      );
+      const plat = sortNewestFirst(
+        platSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Question)),
+        (q) => q.createdAt
+      );
       setMyQuestions(mine);
       setPlatformQuestions(plat);
 
       const allIds = [...mine, ...plat].map((q) => q.id);
-      const akSnaps = await Promise.all(
+      const akSnaps = await Promise.allSettled(
         allIds.map((id) => getDoc(doc(db!, 'questions', id, 'private', 'answerKey')))
       );
       const akMap: Record<string, QuestionAnswerKey> = {};
-      akSnaps.forEach((snap, idx) => {
-        if (snap.exists()) {
-          akMap[allIds[idx]] = snap.data() as QuestionAnswerKey;
+      akSnaps.forEach((res, idx) => {
+        if (res.status === 'fulfilled' && res.value.exists()) {
+          akMap[allIds[idx]] = res.value.data() as QuestionAnswerKey;
         }
       });
       setAnswerKeys(akMap);
