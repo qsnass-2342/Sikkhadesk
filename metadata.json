@@ -1,0 +1,6 @@
+{
+  "name": "ShikkhaDesk",
+  "description": "Multi-tenant Education Management System for home tutors with bilingual English/Bangla support, attendance, offline exams, and secure Nano quizzes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
