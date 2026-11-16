@@ -5,7 +5,6 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   setDoc,
@@ -15,6 +14,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 import { CheckCircle2, FileSpreadsheet, Plus, Send, Trash2 } from 'lucide-react';
 import { db, functions, isFunctionsUnavailableError } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { useStudentsData } from '../students/useStudentsData';
@@ -67,23 +67,21 @@ export function OfflineExamsPage() {
     setLoading(true);
     try {
       const [eSnap, rSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'offlineExams'),
-            where('teacherId', '==', teacherId),
-            orderBy('createdAt', 'desc')
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'offlineResults'),
-            where('teacherId', '==', teacherId),
-            orderBy('publishedAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'offlineExams'), where('teacherId', '==', teacherId))),
+        getDocs(query(collection(db, 'offlineResults'), where('teacherId', '==', teacherId))),
       ]);
-      setExams(eSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineExam)));
-      setResults(rSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineResult)));
+      setExams(
+        sortNewestFirst(
+          eSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineExam)),
+          (e) => e.createdAt
+        )
+      );
+      setResults(
+        sortNewestFirst(
+          rSnap.docs.map((d) => ({ id: d.id, ...d.data() } as OfflineResult)),
+          (r) => r.publishedAt || r.updatedAt
+        )
+      );
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to load exams', 'error');
     } finally {
@@ -182,7 +180,7 @@ export function OfflineExamsPage() {
               marksObtained: val,
               remarks: entry.remarks.trim(),
               published: marksExam.published,
-              publishedAt: serverTimestamp(),
+              ...(marksExam.published ? { publishedAt: serverTimestamp() } : {}),
               updatedAt: serverTimestamp(),
             },
             { merge: true }
