@@ -5,7 +5,6 @@ import {
   deleteDoc,
   doc,
   getDocs,
-  orderBy,
   query,
   serverTimestamp,
   updateDoc,
@@ -24,6 +23,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../../i18n/I18nContext';
 import { useStudentsData } from '../students/useStudentsData';
@@ -77,23 +77,21 @@ export function MaterialsPage() {
     setLoading(true);
     try {
       const [mSnap, aSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'materials'),
-            where('teacherId', '==', teacherId),
-            orderBy('createdAt', 'desc')
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'materialAssignments'),
-            where('teacherId', '==', teacherId),
-            orderBy('assignedAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'materials'), where('teacherId', '==', teacherId))),
+        getDocs(query(collection(db, 'materialAssignments'), where('teacherId', '==', teacherId))),
       ]);
-      setMaterials(mSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Material)));
-      setAssignments(aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MaterialAssignment)));
+      setMaterials(
+        sortNewestFirst(
+          mSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Material)),
+          (m) => m.createdAt
+        )
+      );
+      setAssignments(
+        sortNewestFirst(
+          aSnap.docs.map((d) => ({ id: d.id, ...d.data() } as MaterialAssignment)),
+          (a) => a.assignedAt
+        )
+      );
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to load materials', 'error');
     } finally {
