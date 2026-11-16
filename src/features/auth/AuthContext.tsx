@@ -18,11 +18,9 @@ import {
   setDoc,
   where,
 } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
 import {
   auth,
   db,
-  functions,
   googleProvider,
   isFirebaseConfigured,
 } from '../../lib/firebase';
@@ -43,6 +41,7 @@ interface AuthContextValue {
   whitelistExists: boolean;
   isWhitelistedTeacherEmail: boolean;
   authBlockState: 'none' | 'needs-whitelist-setup' | 'not-whitelisted';
+  authError: string | null;
   signInWithGoogle: (intent: PortalIntent) => Promise<void>;
   sendStudentEmailLink: (email: string) => Promise<void>;
   initializeFirstTeacher: (brandName: string, name: string, phone: string) => Promise<void>;
@@ -69,10 +68,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authBlockState, setAuthBlockState] = useState<
     'none' | 'needs-whitelist-setup' | 'not-whitelisted'
   >('none');
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const loadUserAndRoleData = useCallback(async (user: User) => {
     if (!db) return;
     setLoading(true);
+    setAuthError(null);
     try {
       const userRef = doc(db, 'users', user.uid);
       const whitelistRef = doc(db, 'config', 'teacherWhitelist');
@@ -227,6 +228,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUserProfile(newStudentUser);
         setAuthBlockState('none');
       }
+    } catch (err) {
+      console.error('Failed to load user profile:', err);
+      setAuthError(err instanceof Error ? err.message : 'Failed to load profile from Firestore.');
     } finally {
       setLoading(false);
     }
@@ -348,10 +352,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sessionStorage.removeItem(INTENT_KEY);
   };
 
-  // Expose helper if needed for invite linking
-  void httpsCallable;
-  void functions;
-
   return (
     <AuthContext.Provider
       value={{
@@ -367,6 +367,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         whitelistExists,
         isWhitelistedTeacherEmail,
         authBlockState,
+        authError,
         signInWithGoogle,
         sendStudentEmailLink,
         initializeFirstTeacher,
