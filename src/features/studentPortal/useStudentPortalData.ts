@@ -4,11 +4,11 @@ import {
   doc,
   getDoc,
   getDocs,
-  orderBy,
   query,
   where,
 } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
+import { sortNewestFirst } from '../../lib/firestoreSort';
 import { useAuth } from '../auth/AuthContext';
 import type {
   AttendanceSession,
@@ -61,89 +61,86 @@ export function useStudentPortalData() {
     setLoading(true);
     try {
       const [assignSnap, sessSnap, sumSnap, nanoSnap, attSnap, offSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, 'materialAssignments'),
-            where('studentId', '==', studentId),
-            orderBy('assignedAt', 'desc')
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, 'attendanceSessions'),
-            where('studentId', '==', studentId),
-            orderBy('date', 'desc')
-          )
-        ),
-        getDocs(
-          query(collection(db, 'attendanceSummaries'), where('studentId', '==', studentId))
-        ),
+        getDocs(query(collection(db, 'materialAssignments'), where('studentId', '==', studentId))),
+        getDocs(query(collection(db, 'attendanceSessions'), where('studentId', '==', studentId))),
+        getDocs(query(collection(db, 'attendanceSummaries'), where('studentId', '==', studentId))),
         getDocs(
           query(
             collection(db, 'nanoExams'),
             where('teacherId', '==', teacherId),
-            where('status', '==', 'published'),
-            orderBy('createdAt', 'desc')
+            where('status', '==', 'published')
           )
         ),
-        getDocs(
-          query(
-            collection(db, 'nanoAttempts'),
-            where('studentId', '==', studentId),
-            orderBy('submittedAt', 'desc')
-          )
-        ),
+        getDocs(query(collection(db, 'nanoAttempts'), where('studentId', '==', studentId))),
         getDocs(
           query(
             collection(db, 'offlineResults'),
             where('studentId', '==', studentId),
-            where('published', '==', true),
-            orderBy('publishedAt', 'desc')
+            where('published', '==', true)
           )
         ),
       ]);
 
-      const assignments = assignSnap.docs
-        .map((d) => ({ id: d.id, ...d.data() } as MaterialAssignment))
-        .filter((a) => a.teacherId === teacherId);
+      const assignments = sortNewestFirst(
+        assignSnap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as MaterialAssignment))
+          .filter((a) => a.teacherId === teacherId),
+        (a) => a.assignedAt
+      );
 
-      const matDocs = await Promise.all(
+      const matResults = await Promise.allSettled(
         assignments.map((a) => getDoc(doc(db!, 'materials', a.materialId)))
       );
 
       const matJoined: Array<{ assignment: MaterialAssignment; material: Material }> = [];
       assignments.forEach((a, idx) => {
-        const mSnap = matDocs[idx];
-        if (mSnap.exists()) {
+        const res = matResults[idx];
+        if (res.status === 'fulfilled' && res.value.exists()) {
           matJoined.push({
             assignment: a,
-            material: { id: mSnap.id, ...mSnap.data() } as Material,
+            material: { id: res.value.id, ...res.value.data() } as Material,
           });
         }
       });
 
       setMaterials(matJoined);
       setSessions(
-        sessSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as AttendanceSession))
-          .filter((s) => s.teacherId === teacherId)
+        sortNewestFirst(
+          sessSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as AttendanceSession))
+            .filter((s) => s.teacherId === teacherId),
+          (s) => s.date || s.createdAt
+        )
       );
       setSummaries(
         sumSnap.docs
           .map((d) => ({ id: d.id, ...d.data() } as AttendanceSummary))
           .filter((s) => s.teacherId === teacherId)
       );
-      setNanoExams(nanoSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoExam)));
+      setNanoExams(
+        sortNewestFirst(
+          nanoSnap.docs.map((d) => ({ id: d.id, ...d.data() } as NanoExam)),
+          (e) => e.createdAt
+        )
+      );
       setNanoAttempts(
-        attSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as NanoAttempt))
-          .filter((a) => a.teacherId === teacherId)
+        sortNewestFirst(
+          attSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as NanoAttempt))
+            .filter((a) => a.teacherId === teacherId),
+          (a) => a.submittedAt
+        )
       );
       setOfflineResults(
-        offSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as OfflineResult))
-          .filter((r) => r.teacherId === teacherId)
+        sortNewestFirst(
+          offSnap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as OfflineResult))
+            .filter((r) => r.teacherId === teacherId),
+          (r) => r.publishedAt || r.examDate
+        )
       );
+    } catch (err) {
+      console.error('Student portal load error:', err);
     } finally {
       setLoading(false);
     }
