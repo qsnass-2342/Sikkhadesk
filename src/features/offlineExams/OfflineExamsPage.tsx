@@ -10,6 +10,7 @@ import {
   setDoc,
   updateDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { CheckCircle2, FileSpreadsheet, Plus, Send, Trash2 } from 'lucide-react';
@@ -198,27 +199,54 @@ export function OfflineExamsPage() {
   };
 
   const handlePublishResults = async (exam: OfflineExam) => {
-    if (!functions || !db) return;
+    if (!db) return;
     setPublishing(true);
     setFnUnavailable(false);
     try {
-      const fn = httpsCallable<
-        { examId: string },
-        { publishedCount: number; averageMarks: number }
-      >(functions, 'publishOfflineResults');
-      const res = await fn({ examId: exam.id });
-      showToast(
-        `Published ${res.data.publishedCount} results (Avg: ${res.data.averageMarks})`,
-        'success'
-      );
+      if (functions) {
+        try {
+          const fn = httpsCallable<
+            { examId: string },
+            { publishedCount: number; averageMarks: number }
+          >(functions, 'publishOfflineResults');
+          const res = await fn({ examId: exam.id });
+          showToast(
+            `Published ${res.data.publishedCount} results (Avg: ${res.data.averageMarks})`,
+            'success'
+          );
+          setMarksExam((prev) => (prev ? { ...prev, published: true } : prev));
+          await loadData();
+          return;
+        } catch (fnErr) {
+          if (!isFunctionsUnavailableError(fnErr)) {
+            throw fnErr;
+          }
+        }
+      }
+
+      // Fallback when Cloud Functions are not deployed: publish atomically via Firestore batch
+      const batch = writeBatch(db);
+      batch.update(doc(db, 'offlineExams', exam.id), {
+        published: true,
+        updatedAt: serverTimestamp(),
+      });
+      const related = results.filter((r) => r.examId === exam.id);
+      let sum = 0;
+      related.forEach((r) => {
+        sum += Number(r.marksObtained || 0);
+        batch.update(doc(db!, 'offlineResults', r.id), {
+          published: true,
+          publishedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      const avg = related.length > 0 ? Number((sum / related.length).toFixed(2)) : 0;
+      showToast(`Published ${related.length} results (Avg: ${avg})`, 'success');
       setMarksExam((prev) => (prev ? { ...prev, published: true } : prev));
       await loadData();
     } catch (err) {
-      if (isFunctionsUnavailableError(err)) {
-        setFnUnavailable(true);
-      } else {
-        showToast(err instanceof Error ? err.message : 'Publish failed', 'error');
-      }
+      showToast(err instanceof Error ? err.message : 'Publish failed', 'error');
     } finally {
       setPublishing(false);
     }
