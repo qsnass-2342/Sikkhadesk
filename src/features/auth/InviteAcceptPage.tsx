@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { doc, runTransaction, serverTimestamp, type Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { CheckCircle2, Link2, Mail } from 'lucide-react';
 import { useAuth } from './AuthContext';
-import { functions, isFirebaseConfigured, isFunctionsUnavailableError } from '../../lib/firebase';
+import { db, functions, isFirebaseConfigured, isFunctionsUnavailableError } from '../../lib/firebase';
 import {
   BrandLogo,
   Button,
-  FunctionsUnavailableBanner,
   SurfaceCard,
   inputClass,
 } from '../../components/ui/Primitives';
@@ -31,7 +31,6 @@ export function InviteAcceptPage() {
   const [accepting, setAccepting] = useState(false);
   const [accepted, setAccepted] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [fnUnavailable, setFnUnavailable] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -41,7 +40,7 @@ export function InviteAcceptPage() {
 
   useEffect(() => {
     const runAccept = async () => {
-      if (!token || !firebaseUser || !functions || accepted || accepting) return;
+      if (!token || !firebaseUser || !db || accepted || accepting) return;
       if (userProfile?.role === 'teacher') {
         setErrorMsg('You are signed in as a teacher. Sign out to accept a student invitation.');
         return;
@@ -49,22 +48,102 @@ export function InviteAcceptPage() {
 
       setAccepting(true);
       setErrorMsg(null);
-      setFnUnavailable(false);
       try {
-        const acceptFn = httpsCallable<{ token: string }, { teacherId: string; studentId: string }>(
-          functions,
-          'acceptStudentInvitation'
-        );
-        await acceptFn({ token });
+        let usedFallback = false;
+        if (functions) {
+          try {
+            const acceptFn = httpsCallable<{ token: string }, { teacherId: string; studentId: string }>(
+              functions,
+              'acceptStudentInvitation'
+            );
+            await acceptFn({ token });
+          } catch (fnErr) {
+            if (!isFunctionsUnavailableError(fnErr)) {
+              throw fnErr;
+            }
+            usedFallback = true;
+          }
+        } else {
+          usedFallback = true;
+        }
+
+        if (usedFallback) {
+          await runTransaction(db, async (tx) => {
+            const inviteRef = doc(db!, 'invitations', token);
+            const inviteSnap = await tx.get(inviteRef);
+            if (!inviteSnap.exists()) {
+              throw new Error('Invalid invitation link.');
+            }
+            const invite = inviteSnap.data();
+            if (invite.usedAt) {
+              throw new Error('This invitation link has already been used.');
+            }
+            const expiresAt = invite.expiresAt as Timestamp | undefined;
+            if (expiresAt?.toMillis && expiresAt.toMillis() < Date.now()) {
+              throw new Error('This invitation link has expired.');
+            }
+
+            const userRef = doc(db!, 'users', firebaseUser.uid);
+            const userSnap = await tx.get(userRef);
+            if (userSnap.exists() && userSnap.data()?.role === 'teacher') {
+              throw new Error('Teacher accounts cannot accept student invitations.');
+            }
+
+            const studentRef = doc(db!, 'students', invite.studentId);
+            const studentSnap = await tx.get(studentRef);
+            if (!studentSnap.exists()) {
+              throw new Error('Student record no longer exists.');
+            }
+
+            const relRef = doc(db!, 'relationships', invite.relationshipId);
+            const relSnap = await tx.get(relRef);
+            if (!relSnap.exists()) {
+              throw new Error('Relationship record not found.');
+            }
+
+            const existingStudentIds: string[] = userSnap.exists()
+              ? userSnap.data()?.studentIds || []
+              : [];
+            const existingTeacherIds: string[] = userSnap.exists()
+              ? userSnap.data()?.teacherIds || []
+              : [];
+
+            const nextStudentIds = Array.from(new Set([...existingStudentIds, invite.studentId]));
+            const nextTeacherIds = Array.from(new Set([...existingTeacherIds, invite.teacherId]));
+
+            tx.update(userRef, {
+              studentIds: nextStudentIds,
+              teacherIds: nextTeacherIds,
+              lastInviteToken: token,
+              updatedAt: serverTimestamp(),
+            });
+
+            tx.update(studentRef, {
+              uid: firebaseUser.uid,
+              lastInviteToken: token,
+              updatedAt: serverTimestamp(),
+            });
+
+            tx.update(relRef, {
+              status: 'active',
+              studentUid: firebaseUser.uid,
+              lastInviteToken: token,
+              updatedAt: serverTimestamp(),
+            });
+
+            tx.update(inviteRef, {
+              usedAt: serverTimestamp(),
+              acceptedByUid: firebaseUser.uid,
+            });
+          });
+        }
+
         sessionStorage.removeItem('pending_invite_token');
         await refreshProfile();
         setAccepted(true);
         showToast('Enrolled successfully!', 'success');
         window.setTimeout(() => navigate('/student', { replace: true }), 1100);
       } catch (err) {
-        if (isFunctionsUnavailableError(err)) {
-          setFnUnavailable(true);
-        }
         const msg = err instanceof Error ? err.message : 'Unable to accept invitation.';
         setErrorMsg(msg);
       } finally {
@@ -126,8 +205,6 @@ export function InviteAcceptPage() {
           <div className="py-6 text-center text-sm text-slate-600 dark:text-slate-300">
             Verifying your invitation token...
           </div>
-        ) : fnUnavailable ? (
-          <FunctionsUnavailableBanner context="Accepting invitation links requires the acceptStudentInvitation Cloud Function." />
         ) : errorMsg ? (
           <div className="space-y-4">
             <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-4 text-sm text-rose-800 dark:text-rose-200">
