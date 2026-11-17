@@ -3,6 +3,8 @@ import {
   collection,
   doc,
   serverTimestamp,
+  setDoc,
+  Timestamp,
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
@@ -28,7 +30,6 @@ import type { RelationshipStatus, StudentWithRelationship } from '../../types';
 import {
   Button,
   EmptyState,
-  FunctionsUnavailableBanner,
   Modal,
   SkeletonRows,
   SurfaceCard,
@@ -63,7 +64,7 @@ export function StudentsPage() {
   const [inviteTarget, setInviteTarget] = useState<StudentWithRelationship | null>(null);
   const [inviteUrl, setInviteUrl] = useState('');
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [fnUnavailable, setFnUnavailable] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const filtered = useMemo(() => {
@@ -186,7 +187,7 @@ export function StudentsPage() {
   const handleOpenInvite = async (item: StudentWithRelationship) => {
     setInviteTarget(item);
     setInviteUrl('');
-    setFnUnavailable(false);
+    setInviteError(null);
     setCopied(false);
 
     // Check if an unused, unexpired invitation already exists
@@ -201,28 +202,66 @@ export function StudentsPage() {
     }
   };
 
+  const generateSecureToken = () => {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    let binary = '';
+    bytes.forEach((b) => {
+      binary += String.fromCharCode(b);
+    });
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+
   const handleGenerateInvite = async () => {
-    if (!functions || !inviteTarget) return;
+    if (!db || !userProfile?.uid || !inviteTarget) return;
     setInviteLoading(true);
-    setFnUnavailable(false);
+    setInviteError(null);
     try {
-      const fn = httpsCallable<
-        { studentId: string; relationshipId: string },
-        { token: string; expiresAtMillis: number }
-      >(functions, 'createStudentInvitation');
-      const res = await fn({
+      if (functions) {
+        try {
+          const fn = httpsCallable<
+            { studentId: string; relationshipId: string },
+            { token: string; expiresAtMillis: number }
+          >(functions, 'createStudentInvitation');
+          const res = await fn({
+            studentId: inviteTarget.student.id,
+            relationshipId: inviteTarget.relationship.id,
+          });
+          setInviteUrl(`${window.location.origin}/invite/${res.data.token}`);
+          showToast('Invitation link generated', 'success');
+          await reload();
+          return;
+        } catch (fnErr) {
+          if (!isFunctionsUnavailableError(fnErr)) {
+            throw fnErr;
+          }
+          // Cloud Functions not deployed — fall through to direct Firestore invitation creation
+        }
+      }
+
+      const token = generateSecureToken();
+      const expiresAt = Timestamp.fromMillis(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await setDoc(doc(db, 'invitations', token), {
+        teacherId: userProfile.uid,
         studentId: inviteTarget.student.id,
         relationshipId: inviteTarget.relationship.id,
+        expiresAt,
+        usedAt: null,
+        createdAt: serverTimestamp(),
       });
-      setInviteUrl(`${window.location.origin}/invite/${res.data.token}`);
+      setInviteUrl(`${window.location.origin}/invite/${token}`);
       showToast('Invitation link generated', 'success');
       await reload();
     } catch (err) {
-      if (isFunctionsUnavailableError(err)) {
-        setFnUnavailable(true);
+      const msg = err instanceof Error ? err.message : 'Could not create invite';
+      if (msg.toLowerCase().includes('permission')) {
+        setInviteError(
+          'Firestore rules blocked creating the invitation. Copy the updated firestore.rules into Firebase Console -> Firestore Database -> Rules and publish.'
+        );
       } else {
-        showToast(err instanceof Error ? err.message : 'Could not create invite', 'error');
+        setInviteError(msg);
       }
+      showToast(msg, 'error');
     } finally {
       setInviteLoading(false);
     }
@@ -589,8 +628,10 @@ export function StudentsPage() {
             {t.students.inviteModalDesc}
           </p>
 
-          {fnUnavailable && (
-            <FunctionsUnavailableBanner context="Generating secure single-use invitation tokens requires the createStudentInvitation Cloud Function." />
+          {inviteError && (
+            <div className="rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 p-3.5 text-xs text-rose-800 dark:text-rose-200 leading-relaxed">
+              {inviteError}
+            </div>
           )}
 
           {inviteUrl ? (
